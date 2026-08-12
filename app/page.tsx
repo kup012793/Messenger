@@ -45,6 +45,7 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [stickerOpen, setStickerOpen] = useState(false);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const imageInput = useRef<HTMLInputElement>(null);
   const stickerInput = useRef<HTMLInputElement>(null);
   const bottom = useRef<HTMLDivElement>(null);
@@ -106,6 +107,15 @@ export default function Home() {
 
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
+  useEffect(() => {
+    if (!expandedImage) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setExpandedImage(null);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [expandedImage]);
+
   function selectProfile(name: UserName) {
     localStorage.setItem(PROFILE_KEY, JSON.stringify({ myName: name }));
     setMyName(name);
@@ -140,6 +150,7 @@ export default function Home() {
 
   async function addImage(file?: File) {
     if (!file) return;
+    if (!file.type.startsWith("image/")) return;
     if (file.size > 10 * 1024 * 1024) return alert("사진은 10MB 이하여야 합니다.");
     setBusy(true);
     try {
@@ -212,7 +223,7 @@ export default function Home() {
     </nav></header>
     <div className="single-messages"><div className="date">오늘</div>
       {messages.length === 0 && <div className="no-messages"><MessageCircle /><p>{error || <>아직 메시지가 없어요.<br />먼저 인사를 건네보세요.</>}</p></div>}
-      {messages.map((message) => <MessageBubble key={message.id} message={message} myName={myName as UserName} friendName={friendName} friendAvatar={friendAvatar} />)}
+      {messages.map((message) => <MessageBubble key={message.id} message={message} myName={myName as UserName} friendName={friendName} friendAvatar={friendAvatar} onExpandImage={setExpandedImage} />)}
       <div ref={bottom} />
     </div>
     {error && messages.length > 0 && <div className="sync-error" onClick={() => setError("")}>{error}<X /></div>}
@@ -222,20 +233,29 @@ export default function Home() {
       {stickers.length === 0 && <p>등록한 이모티콘은 두 기기에서 함께 사용할 수 있어요.</p>}
     </div>}
     <form className="single-composer" onSubmit={(event) => { event.preventDefault(); void addMessage(text); }}>
-      <input ref={imageInput} hidden type="file" accept="image/*" onChange={(event) => void addImage(event.target.files?.[0])} />
+      <input ref={imageInput} hidden type="file" accept="image/*" onChange={(event) => { void addImage(event.target.files?.[0]); event.target.value = ""; }} />
       <input ref={stickerInput} hidden type="file" accept="image/*" multiple onChange={(event) => { void registerStickers(event.target.files); event.target.value = ""; }} />
       <button type="button" className="image-button" disabled={busy} onClick={() => imageInput.current?.click()}><ImagePlus /></button>
       <button type="button" className={`sticker-button ${stickerOpen ? "active" : ""}`} onClick={() => setStickerOpen((open) => !open)}><Smile /></button>
-      <textarea rows={1} value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void addMessage(text); } }} placeholder={busy ? "업로드 중…" : "메시지를 입력하세요"} />
+      <textarea rows={1} value={text} onChange={(event) => setText(event.target.value)} onPaste={(event) => {
+        const image = Array.from(event.clipboardData.items).find((item) => item.kind === "file" && item.type.startsWith("image/"))?.getAsFile();
+        if (!image) return;
+        event.preventDefault();
+        void addImage(image);
+      }} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void addMessage(text); } }} placeholder={busy ? "업로드 중…" : "메시지를 입력하세요"} />
       <button className="send-button" disabled={!text.trim() || busy}><Send /></button>
     </form>
+    {expandedImage && <div className="image-lightbox" role="dialog" aria-modal="true" aria-label="원본 이미지 보기" onMouseDown={(event) => { if (event.target === event.currentTarget) setExpandedImage(null); }}>
+      <button type="button" className="image-lightbox-close" onClick={() => setExpandedImage(null)} aria-label="이미지 닫기"><X /></button>
+      <img src={expandedImage} alt="원본 첨부 이미지" />
+    </div>}
   </section></main>;
 }
 
-function MessageBubble({ message, myName, friendName, friendAvatar }: { message: Message; myName: UserName; friendName: string; friendAvatar: string }) {
+function MessageBubble({ message, myName, friendName, friendAvatar, onExpandImage }: { message: Message; myName: UserName; friendName: string; friendAvatar: string; onExpandImage: (url: string) => void }) {
   const mine = message.sender === myName;
   const time = new Intl.DateTimeFormat("ko-KR", { hour: "numeric", minute: "2-digit" }).format(new Date(message.createdAt));
-  return <div className={`one-message ${mine ? "mine" : ""}`}>{!mine && <div className="tiny-avatar"><img src={friendAvatar} alt={`${friendName} 프로필`} /></div>}<div><div className="one-line">{mine && <time>{time}</time>}<article>{message.imageUrl && <img src={message.imageUrl} alt="첨부 이미지" />}{message.content && <p>{message.content}</p>}{message.linkUrl && <a href={message.linkUrl} target="_blank" rel="noreferrer">링크 열기 · {message.linkUrl.replace(/^https?:\/\//, "")}</a>}</article>{!mine && <time>{time}</time>}</div></div></div>;
+  return <div className={`one-message ${mine ? "mine" : ""}`}>{!mine && <div className="tiny-avatar"><img src={friendAvatar} alt={`${friendName} 프로필`} /></div>}<div><div className="one-line">{mine && <time>{time}</time>}<article>{message.imageUrl && <button type="button" className="message-image" onClick={() => onExpandImage(message.imageUrl!)} aria-label="원본 이미지 보기"><img src={message.imageUrl} alt="첨부 이미지" /></button>}{message.content && <p>{message.content}</p>}{message.linkUrl && <a href={message.linkUrl} target="_blank" rel="noreferrer">링크 열기 · {message.linkUrl.replace(/^https?:\/\//, "")}</a>}</article>{!mine && <time>{time}</time>}</div></div></div>;
 }
 
 async function compressImage(file: File, maxBytes: number): Promise<Blob> {
