@@ -18,6 +18,14 @@ npm run dev
 4. Project Settings → API의 Project URL과 anon key를 `.env.local`에 입력합니다.
 5. 친구 두 명이 각자 이메일 매직 링크로 로그인하면 같은 대화방을 사용합니다.
 
+앱은 최근 24시간 메시지만 조회합니다. 메시지 행과 첨부 이미지 파일을 함께 자동 삭제하려면 다음 설정을 한 번 진행합니다.
+
+1. 기존 프로젝트의 SQL Editor에서 갱신된 `supabase/schema.sql` 전체를 다시 실행합니다. 이전 DB 전용 삭제 작업이 있다면 이 과정에서 해제됩니다.
+2. Supabase CLI에서 `supabase functions deploy cleanup-expired-messages`를 실행하거나, Dashboard의 Edge Functions에서 `supabase/functions/cleanup-expired-messages/index.ts`를 배포합니다.
+3. Dashboard → Integrations → Cron에서 작업을 만들고, 실행 대상을 Supabase Edge Function `cleanup-expired-messages`, 스케줄을 `*/5 * * * *`로 설정합니다.
+
+정리 함수는 만료 메시지에 연결된 `chat-media/images/` 파일을 Storage API로 먼저 삭제한 뒤 메시지 행을 삭제합니다. 공유 이모티콘이 저장되는 `chat-media/stickers/` 경로는 삭제 대상에서 명시적으로 제외됩니다.
+
 ## Vercel 배포
 
 GitHub 저장소를 Vercel에 연결한 뒤 다음 환경변수를 Production/Preview/Development에 등록합니다.
