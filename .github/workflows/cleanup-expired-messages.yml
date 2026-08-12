@@ -1,0 +1,21 @@
+name: Cleanup expired messages
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove expired messages and chat images
+        env:
+          SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            "https://${SUPABASE_PROJECT_ID}.supabase.co/functions/v1/cleanup-expired-messages"
