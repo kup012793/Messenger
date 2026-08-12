@@ -12,6 +12,27 @@ type DbSticker = { id: string; name: string; image_url: string; storage_path: st
 const PROFILE_KEY = "sai-local-profile";
 const supabase = createClient();
 
+async function showBrowserNotification(title: string, body: string, tag = `sai-${Date.now()}`) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return false;
+
+  // Mobile browsers (including iOS PWAs) require notifications to be shown by
+  // a service worker. Using it on desktop too gives us one consistent path.
+  if ("serviceWorker" in navigator) {
+    const registration = await navigator.serviceWorker.ready;
+    await registration.showNotification(title, {
+      body,
+      icon: "/avatars/jeongmi.png",
+      badge: "/avatars/jeongmi.png",
+      tag,
+      data: { url: "/" },
+    });
+    return true;
+  }
+
+  new Notification(title, { body });
+  return true;
+}
+
 const toMessage = (row: DbMessage): Message => ({ id: row.id, content: row.content, imageUrl: row.image_url || undefined, linkUrl: row.link_url || undefined, sender: row.sender_name, createdAt: row.created_at });
 const toSticker = (row: DbSticker): Sticker => ({ id: row.id, name: row.name, imageUrl: row.image_url, storagePath: row.storage_path });
 
@@ -31,6 +52,11 @@ export default function Home() {
   currentName.current = myName;
 
   useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      void navigator.serviceWorker.register("/notification-sw.js").catch(() => {
+        setError("알림 서비스를 시작하지 못했습니다. 보안 연결(HTTPS)인지 확인해 주세요.");
+      });
+    }
     const saved = localStorage.getItem(PROFILE_KEY);
     if (saved) {
       try {
@@ -53,8 +79,15 @@ export default function Home() {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages" }, (payload) => {
         const incoming = toMessage(payload.new as DbMessage);
         setMessages((old) => old.some((item) => item.id === incoming.id) ? old : [...old, incoming]);
-        if (incoming.sender !== currentName.current && document.hidden && Notification.permission === "granted") {
-          new Notification(`${incoming.sender}에게 새 메시지`, { body: incoming.content || "이미지를 보냈어요." });
+        const appIsInBackground = document.visibilityState !== "visible" || !document.hasFocus();
+        if (incoming.sender !== currentName.current && appIsInBackground) {
+          void showBrowserNotification(
+            `${incoming.sender}님의 새 메시지`,
+            incoming.content || "이미지를 보냈어요.",
+            `sai-message-${incoming.id}`,
+          ).catch(() => {
+            setError("새 메시지는 도착했지만 알림을 표시하지 못했습니다. 알림 권한을 확인해 주세요.");
+          });
         }
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "messages" }, (payload) => setMessages((old) => old.filter((item) => item.id !== payload.old.id)))
@@ -63,7 +96,11 @@ export default function Home() {
         setStickers((old) => old.some((item) => item.id === incoming.id) ? old : [...old, incoming]);
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "stickers" }, (payload) => setStickers((old) => old.filter((item) => item.id !== payload.old.id)))
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          setError("실시간 연결이 끊겼습니다. 인터넷 연결을 확인한 뒤 새로고침해 주세요.");
+        }
+      });
     return () => { void supabase.removeChannel(channel); };
   }, []);
 
@@ -143,10 +180,16 @@ export default function Home() {
   }
 
   async function testNotification() {
+    if (!window.isSecureContext) return alert("알림은 HTTPS 보안 주소에서만 사용할 수 있습니다.");
     if (!("Notification" in window)) return alert("이 브라우저는 알림을 지원하지 않습니다.");
     const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
-    if (permission === "granted") new Notification("사이 메신저", { body: "알림이 정상적으로 설정됐어요." });
-    else alert("주소창의 사이트 설정에서 알림을 허용해 주세요.");
+    if (permission === "granted") {
+      try {
+        await showBrowserNotification("사이 메신저", "알림이 정상적으로 설정됐어요.");
+      } catch {
+        alert("알림을 표시하지 못했습니다. 브라우저 또는 휴대폰의 알림 설정을 확인해 주세요.");
+      }
+    } else alert("주소창의 사이트 설정에서 알림을 허용해 주세요. 차단된 권한은 버튼만으로 다시 요청할 수 없습니다.");
   }
 
   function changeProfile() { localStorage.removeItem(PROFILE_KEY); setMyName(""); }
