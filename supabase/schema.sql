@@ -42,6 +42,7 @@ alter table public.messages enable row level security;
 alter table public.stickers enable row level security;
 
 grant select, insert, delete on table public.messages to anon, authenticated;
+grant select, delete on table public.messages to service_role;
 grant select, insert, delete on table public.stickers to anon, authenticated;
 
 drop policy if exists "everyone reads messages" on public.messages;
