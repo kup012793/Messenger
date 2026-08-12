@@ -1,4 +1,5 @@
 create extension if not exists "pgcrypto";
+create extension if not exists "pg_cron";
 
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
@@ -9,6 +10,24 @@ create table if not exists public.messages (
   created_at timestamptz not null default now(),
   constraint message_has_content check (length(trim(content)) > 0 or image_url is not null)
 );
+
+create index if not exists messages_created_at_idx on public.messages (created_at);
+
+-- File-backed messages are cleaned up by the cleanup-expired-messages Edge
+-- Function. Remove the previous database-only job because it cannot delete the
+-- corresponding object from Storage and would leave orphaned files behind.
+do $$
+declare
+  existing_job_id bigint;
+begin
+  select jobid into existing_job_id
+  from cron.job
+  where jobname = 'delete-messages-older-than-24-hours';
+
+  if existing_job_id is not null then
+    perform cron.unschedule(existing_job_id);
+  end if;
+end $$;
 
 create table if not exists public.stickers (
   id uuid primary key default gen_random_uuid(),

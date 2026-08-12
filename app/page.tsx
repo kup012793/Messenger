@@ -10,9 +10,12 @@ type Sticker = { id: string; name: string; imageUrl: string; storagePath: string
 type DbMessage = { id: string; content: string; image_url: string | null; link_url: string | null; sender_name: UserName; created_at: string };
 type DbSticker = { id: string; name: string; image_url: string; storage_path: string };
 const PROFILE_KEY = "sai-local-profile";
+const MESSAGE_RETENTION_MS = 24 * 60 * 60 * 1000;
 const supabase = createClient();
+const getAvatarUrl = (name: UserName) => name === "정미" ? "/avatars/jeongmi.png" : "/avatars/hyunwoo.png";
+const getMessageCutoff = () => new Date(Date.now() - MESSAGE_RETENTION_MS).toISOString();
 
-async function showBrowserNotification(title: string, body: string, tag = `sai-${Date.now()}`) {
+async function showBrowserNotification(title: string, body: string, tag = `sai-${Date.now()}`, icon?: string) {
   if (!("Notification" in window) || Notification.permission !== "granted") return false;
 
   // Mobile browsers (including iOS PWAs) require notifications to be shown by
@@ -21,15 +24,15 @@ async function showBrowserNotification(title: string, body: string, tag = `sai-$
     const registration = await navigator.serviceWorker.ready;
     await registration.showNotification(title, {
       body,
-      icon: "/avatars/jeongmi.png",
-      badge: "/avatars/jeongmi.png",
+      icon,
+      badge: icon,
       tag,
       data: { url: "/" },
     });
     return true;
   }
 
-  new Notification(title, { body });
+  new Notification(title, { body, icon });
   return true;
 }
 
@@ -67,7 +70,7 @@ export default function Home() {
     }
     if (!supabase) { setError("Supabase 환경변수가 설정되지 않았습니다."); setReady(true); return; }
     Promise.all([
-      supabase.from("messages").select("*").order("created_at", { ascending: true }).limit(500),
+      supabase.from("messages").select("*").gte("created_at", getMessageCutoff()).order("created_at", { ascending: true }).limit(500),
       supabase.from("stickers").select("*").order("created_at", { ascending: true }).limit(30),
     ]).then(([messageResult, stickerResult]) => {
       if (messageResult.error) setError("Supabase SQL 스키마를 먼저 실행해 주세요.");
@@ -86,6 +89,7 @@ export default function Home() {
             `${incoming.sender}님의 새 메시지`,
             incoming.content || "이미지를 보냈어요.",
             `sai-message-${incoming.id}`,
+            getAvatarUrl(incoming.sender),
           ).catch(() => {
             setError("새 메시지는 도착했지만 알림을 표시하지 못했습니다. 알림 권한을 확인해 주세요.");
           });
@@ -108,6 +112,15 @@ export default function Home() {
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [messages]);
 
   useEffect(() => {
+    const removeExpiredMessages = () => {
+      const cutoff = Date.now() - MESSAGE_RETENTION_MS;
+      setMessages((old) => old.filter((message) => new Date(message.createdAt).getTime() >= cutoff));
+    };
+    const timer = window.setInterval(removeExpiredMessages, 60 * 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     if (!expandedImage) return;
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setExpandedImage(null);
@@ -123,7 +136,7 @@ export default function Home() {
   }
 
   const friendName: UserName = myName === "정미" ? "현우" : "정미";
-  const friendAvatar = friendName === "정미" ? "/avatars/jeongmi.png" : "/avatars/hyunwoo.png";
+  const friendAvatar = getAvatarUrl(friendName);
 
   async function addMessage(content: string, imageUrl?: string) {
     if (!supabase || !myName) return;
@@ -196,7 +209,7 @@ export default function Home() {
     const permission = Notification.permission === "default" ? await Notification.requestPermission() : Notification.permission;
     if (permission === "granted") {
       try {
-        await showBrowserNotification("사이 메신저", "알림이 정상적으로 설정됐어요.");
+        await showBrowserNotification("사이 메신저", "알림이 정상적으로 설정됐어요.", undefined, friendAvatar);
       } catch {
         alert("알림을 표시하지 못했습니다. 브라우저 또는 휴대폰의 알림 설정을 확인해 주세요.");
       }
