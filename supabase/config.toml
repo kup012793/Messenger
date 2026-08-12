@@ -1,0 +1,4 @@
+project_id = "hwgoknijzhvvkpvisllq"
+
+[functions.cleanup-expired-messages]
+verify_jwt = false
